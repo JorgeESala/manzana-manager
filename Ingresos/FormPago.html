@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+  <style>
+    body { padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .btn-save { background-color: #38761d; color: white; width: 100%; font-weight: bold; }
+    .btn-search { background-color: #4a86e8; color: white; width: 100%; font-weight: bold; }
+    .header { text-align: center; color: #674ea7; margin-bottom: 20px; }
+    .cargo-item { cursor: pointer; padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; margin-bottom: 8px; transition: all 0.2s; }
+    .cargo-item:hover { border-color: #4a86e8; background: #f0f4ff; }
+    .cargo-item.selected { border-color: #38761d; background: #f0fdf4; }
+    .cargo-concepto { font-weight: bold; font-size: 15px; }
+    .cargo-detalle { font-size: 13px; color: #666; }
+    .cargo-monto { font-weight: bold; color: #dc2626; font-size: 16px; }
+    .step { display: none; }
+    .step.active { display: block; }
+  </style>
+</head>
+
+<body>
+  <div class="header">
+    <h4>Registro de Pago</h4>
+  </div>
+
+  <div id="resultado" class="mt-3 text-center fw-bold"></div>
+
+  <!-- PASO 1: Buscar ID -->
+  <div id="paso1" class="step active">
+    <div class="mb-3">
+      <label class="form-label">ID Vivienda (Edificio Depto)</label>
+      <input type="text" class="form-control" id="idVivienda" placeholder="Ej: P2 101" required onkeydown="if(event.key==='Enter')buscarCargos()">
+    </div>
+    <button type="button" class="btn btn-search" onclick="buscarCargos()">🔍 Buscar Cargos Pendientes</button>
+    <div id="spinnerBusqueda" class="text-center mt-2" style="display:none;color:#666;">Buscando cargos...</div>
+  </div>
+
+  <!-- PASO 2: Seleccionar cargo -->
+  <div id="paso2" class="step">
+    <p class="fw-bold mb-2">
+      Cargos pendientes para <span id="lblIdVivienda" class="text-primary"></span>:
+    </p>
+    <p class="text-muted" style="font-size:12px;">Selecciona el cargo que deseas pagar:</p>
+    <div id="listaCargos"></div>
+    <button type="button" class="btn btn-outline-secondary mt-2" onclick="volverPaso1()" style="width:100%;">← Cambiar ID</button>
+  </div>
+
+  <!-- PASO 3: Datos del pago -->
+  <div id="paso3" class="step">
+    <div class="alert alert-info py-2 px-3 mb-3" style="font-size:14px;">
+      Pagando: <b id="resumenCargo"></b>
+    </div>
+    <form id="pagoForm">
+      <div class="mb-3">
+        <label class="form-label">Monto a Pagar ($)</label>
+        <input type="number" class="form-control" id="monto" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Fecha del Pago</label>
+        <input type="date" class="form-control" id="fecha" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Método de Pago</label>
+        <select class="form-select" id="metodo" onchange="toggleFolio()">
+          <option value="Transferencia">Transferencia</option>
+          <option value="Efectivo">Efectivo</option>
+        </select>
+      </div>
+      <div class="mb-3" id="divFolio">
+        <label class="form-label">Folio de Transferencia / Referencia</label>
+        <input type="text" class="form-control" id="folio" placeholder="Ej: 123456789">
+      </div>
+      <button type="button" class="btn btn-save" onclick="enviar()">REGISTRAR PAGO</button>
+    </form>
+    <button type="button" class="btn btn-outline-secondary mt-2" onclick="volverPaso2()" style="width:100%;">← Elegir otro cargo</button>
+  </div>
+
+  <script>
+    let cargoSeleccionado = null;
+
+    document.getElementById('fecha').valueAsDate = new Date();
+
+    function toggleFolio() {
+      const metodo = document.getElementById('metodo').value;
+      const divFolio = document.getElementById('divFolio');
+      const inputFolio = document.getElementById('folio');
+      if (metodo === "Efectivo") {
+        divFolio.style.opacity = "0.5";
+        inputFolio.disabled = true;
+        inputFolio.value = "";
+      } else {
+        divFolio.style.opacity = "1";
+        inputFolio.disabled = false;
+      }
+    }
+
+    function mostrarPaso(id) {
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    function volverPaso1() { mostrarPaso('paso1'); }
+    function volverPaso2() { mostrarPaso('paso2'); }
+
+    function buscarCargos() {
+      const id = document.getElementById('idVivienda').value.trim();
+      if (!id) { alert('Ingresa un ID de Vivienda'); return; }
+
+      document.getElementById('spinnerBusqueda').style.display = 'block';
+      document.getElementById('resultado').innerHTML = '';
+      document.getElementById('resultado').className = 'mt-3 text-center fw-bold';
+
+      google.script.run
+        .withSuccessHandler(cargos => {
+          document.getElementById('spinnerBusqueda').style.display = 'none';
+          if (cargos.length === 0) {
+            document.getElementById('resultado').className = 'mt-3 text-center text-warning fw-bold';
+            document.getElementById('resultado').innerHTML = '⚠️ No hay cargos pendientes para ' + id;
+            return;
+          }
+          document.getElementById('lblIdVivienda').innerText = id;
+          const container = document.getElementById('listaCargos');
+          container.innerHTML = '';
+            cargos.forEach((c, idx) => {
+            const div = document.createElement('div');
+            div.className = 'cargo-item';
+            div.onclick = () => seleccionarCargo(idx, c);
+            div.id = 'cargo-' + idx;
+            const tieneRecargo = c.montoOriginal !== c.montoConRecargo;
+            div.innerHTML =
+              '<div class="cargo-concepto">' + c.concepto + (tieneRecargo ? ' <span class="badge bg-warning text-dark">+Recargo</span>' : '') + '</div>' +
+              '<div class="cargo-detalle">Mes: ' + c.mes + '</div>' +
+              '<div class="cargo-monto">' + (tieneRecargo ? '<span style="text-decoration:line-through;color:#999;font-size:13px;">$' + c.montoOriginal.toFixed(2) + '</span> ' : '') + '$' + c.montoConRecargo.toFixed(2) + '</div>';
+            container.appendChild(div);
+          });
+          mostrarPaso('paso2');
+        })
+        .withFailureHandler(err => {
+          document.getElementById('spinnerBusqueda').style.display = 'none';
+          document.getElementById('resultado').className = 'mt-3 text-center text-danger fw-bold';
+          document.getElementById('resultado').innerHTML = 'Error: ' + err.message;
+        })
+        .obtenerCargosPendientes(id);
+    }
+
+    function recalcularMonto() {
+      if (!cargoSeleccionado) return;
+      const fecha = document.getElementById('fecha').value;
+      if (!fecha) return;
+      const dia = new Date(fecha + 'T12:00:00').getDate();
+      const esMantenimiento = cargoSeleccionado.concepto === 'Mantenimiento';
+      const montoBase = cargoSeleccionado.montoOriginal;
+      const montoFinal = (esMantenimiento && montoBase === 500 && dia > 10) ? 550 : montoBase;
+      document.getElementById('monto').value = montoFinal;
+      const conRecargo = montoFinal !== cargoSeleccionado.montoOriginal;
+      document.getElementById('resumenCargo').innerText = cargoSeleccionado.concepto + ' - ' + cargoSeleccionado.mes + ' ($' + cargoSeleccionado.montoOriginal.toFixed(2) + (conRecargo ? ' → $' + montoFinal.toFixed(2) + ' con recargo' : '') + ')';
+    }
+
+    function seleccionarCargo(idx, cargo) {
+      document.querySelectorAll('.cargo-item').forEach(el => el.classList.remove('selected'));
+      document.getElementById('cargo-' + idx).classList.add('selected');
+      cargoSeleccionado = cargo;
+      document.getElementById('resumenCargo').innerText = cargo.concepto + ' - ' + cargo.mes + ' ($' + cargo.monto.toFixed(2) + ')';
+      document.getElementById('monto').value = cargo.monto;
+      mostrarPaso('paso3');
+      recalcularMonto();
+    }
+
+    document.getElementById('fecha').addEventListener('change', recalcularMonto);
+
+    function enviar() {
+      if (!cargoSeleccionado) { alert('Selecciona un cargo primero.'); return; }
+      const monto = document.getElementById('monto').value;
+      if (!monto || parseFloat(monto) <= 0) { alert('Ingresa un monto válido.'); return; }
+
+      const btn = document.querySelector('.btn-save');
+      btn.disabled = true;
+      btn.innerHTML = "Procesando...";
+      document.getElementById('resultado').innerHTML = '';
+
+      const datos = {
+        idVivienda: document.getElementById('idVivienda').value,
+        filaCargo: cargoSeleccionado.fila,
+        monto: monto,
+        fecha: document.getElementById('fecha').value,
+        metodo: document.getElementById('metodo').value,
+        folio: document.getElementById('folio').value
+      };
+
+      google.script.run
+        .withSuccessHandler(res => {
+          document.getElementById('resultado').className = "mt-3 text-center text-success fw-bold";
+          document.getElementById('resultado').innerHTML = res;
+          btn.disabled = false;
+          btn.innerHTML = "REGISTRAR PAGO";
+          cargoSeleccionado = null;
+          document.getElementById('idVivienda').value = '';
+          mostrarPaso('paso1');
+        })
+        .withFailureHandler(err => {
+          document.getElementById('resultado').className = "mt-3 text-center text-danger fw-bold";
+          document.getElementById('resultado').innerHTML = err.message;
+          btn.disabled = false;
+          btn.innerHTML = "REINTENTAR";
+        })
+        .procesarPagoDesdeHTML(datos);
+    }
+  </script>
+</body>
+
+</html>
