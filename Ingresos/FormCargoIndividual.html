@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+  <style>
+    body { padding: 20px; font-family: 'Segoe UI', sans-serif; }
+    .btn-save { background-color: #4a86e8; color: white; width: 100%; font-weight: bold; }
+    .header { text-align: center; color: #674ea7; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h4>Agregar Cargo Individual</h4>
+  </div>
+
+  <form id="cargoForm">
+    <div class="mb-3">
+      <label class="form-label">Manzana</label>
+      <select class="form-select" id="manzana" required>
+        <option value="MZ 17">MZ 17</option>
+        <option value="MZ 19">MZ 19</option>
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">ID Vivienda</label>
+      <input type="text" class="form-control" id="idVivienda" placeholder="Ej: P2 101" required>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Concepto</label>
+      <input type="text" class="form-control" id="concepto" placeholder="Ej: Multa, Reparación, Agua" required>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Monto ($)</label>
+      <input type="number" class="form-control" id="monto" placeholder="Ej: 500" step="0.01" required>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Mes</label>
+      <input type="text" class="form-control" id="mes" placeholder="Ej: Junio 2026" required>
+    </div>
+
+    <button type="button" class="btn btn-save" onclick="registrar()">AGREGAR CARGO</button>
+  </form>
+
+  <div id="resultado" class="mt-3 text-center fw-bold"></div>
+
+  <script>
+    function registrar() {
+      const btn = document.querySelector('button');
+      btn.disabled = true;
+
+      const datos = {
+        manzana: document.getElementById('manzana').value,
+        idVivienda: document.getElementById('idVivienda').value.trim().toUpperCase(),
+        concepto: document.getElementById('concepto').value.trim(),
+        monto: parseFloat(document.getElementById('monto').value),
+        mes: document.getElementById('mes').value.trim()
+      };
+
+      if (!datos.idVivienda || !datos.concepto || isNaN(datos.monto) || !datos.mes) {
+        document.getElementById('resultado').className = "mt-3 text-center text-danger";
+        document.getElementById('resultado').innerHTML = "Completa todos los campos.";
+        btn.disabled = false;
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(res => {
+          document.getElementById('resultado').className = "mt-3 text-center text-success";
+          document.getElementById('resultado').innerHTML = res;
+          document.getElementById('cargoForm').reset();
+          btn.disabled = false;
+        })
+        .withFailureHandler(err => {
+          document.getElementById('resultado').className = "mt-3 text-center text-danger";
+          document.getElementById('resultado').innerHTML = err.message;
+          btn.disabled = false;
+        })
+        .procesarCargoIndividual(datos);
+    }
+  </script>
+</body>
+</html>

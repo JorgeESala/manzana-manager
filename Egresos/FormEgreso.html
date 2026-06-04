@@ -16,6 +16,15 @@
     
     <form id="egresoForm">
       <div class="mb-3">
+        <label class="form-label">Manzana</label>
+        <select class="form-select" id="bloque" required>
+          <option value="MZ 17">MZ 17</option>
+          <option value="MZ 19">MZ 19</option>
+          <option value="Compartido">Compartido (Ambos)</option>
+        </select>
+      </div>
+
+      <div class="mb-3">
         <label class="form-label">Categoría del Gasto</label>
         <select class="form-select" id="categoria" required>
           <option value="Mantenimiento Piscina">Mantenimiento Piscina</option>
@@ -63,6 +72,7 @@
         btn.disabled = true;
         
         const datos = {
+          bloque: document.getElementById('bloque').value,
           categoria: document.getElementById('categoria').value,
           descripcion: document.getElementById('descripcion').value,
           monto: document.getElementById('monto').value,

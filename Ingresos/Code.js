@@ -5,6 +5,14 @@
 
 const FOLDER_ID = "1U2r8nB7DHfBIMnfzl366AI0j7VLE4jUP";
 
+function obtenerBloqueActivo() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const panel = ss.getSheetByName("Panel");
+  if (!panel) return "MZ 17";
+  const bloque = panel.getRange("B5").getValue();
+  return bloque || "MZ 17";
+}
+
 // ==========================================
 // 1. BOTÓN HOJA "RECIBOS": GUARDAR, PDF Y CORREO (GMAIL WEB)
 // ==========================================
@@ -15,8 +23,7 @@ function generarRecibo() {
   const sheetCargos = ss.getSheetByName("Cargos");
   const sheetPropietarios = ss.getSheetByName("Propietarios");
 
-  // 1. CAPTURA DE DATOS DEL FORMULARIO
-  const idVivienda = sheetRecibos.getRange("B3").getValue(); // Ej: "P2 101"
+  const idVivienda = sheetRecibos.getRange("B3").getValue();
   const mesAPagar = sheetRecibos.getRange("G2").getValue();
   const montoPagado = sheetRecibos.getRange("F18").getValue();
   const formaPago = sheetRecibos.getRange("G5").getValue();
@@ -27,66 +34,52 @@ function generarRecibo() {
     return;
   }
 
-  // 2. BUSCAR EL NOMBRE DIRECTAMENTE EN "PROPIETARIOS" (Columna D)
-  // Buscamos el ID Vivienda en la Columna H y traemos lo que está en la D
+  // Read Propietarios columns D through H (Nombre, Tel, Correo, ID Vivienda, Manzana)
   const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
   let nombreReal = "Nombre no encontrado";
+  let bloqueProp = "MZ 17";
 
   for (let i = 0; i < datosProp.length; i++) {
-    // datosProp[i][4] es la columna H (ID Vivienda)
-    // datosProp[i][0] es la columna D (Nombre)
-    if (datosProp[i][4] === idVivienda) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === idVivienda) {
       nombreReal = datosProp[i][0];
+      bloqueProp = (datosProp[i][4] || "MZ 17").toString().trim();
       break;
     }
   }
 
-  // 3. ACTUALIZAR ESTATUS EN "CARGOS"
+  // Update Cargos status
   const datosCargos = sheetCargos.getDataRange().getValues();
   for (let i = 1; i < datosCargos.length; i++) {
     if (datosCargos[i][1] === idVivienda && datosCargos[i][5] === mesAPagar && datosCargos[i][4] === "Pendiente") {
       sheetCargos.getRange(i + 1, 5).setValue("Pagado");
+      sheetCargos.getRange(i + 1, 8).setValue(0);
       break;
     }
   }
 
-  // 4. LÓGICA DE FECHAS Y RECARGO
   const fechaHoy = new Date();
   const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+  const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+  const esMesAnterior = mesAPagar !== mesAnioActual;
+  const esPagoTardio = fechaHoy.getDate() > 10;
+  let recargo = (esMesAnterior || esPagoTardio) ? 50 : 0;
 
-  let recargo = (mesAPagar !== mesActualStr || fechaHoy.getDate() > 10) ? montoPagado * 0.10 : 0;
-
-  // 5. PASAR AL HISTORIAL
   const partes = idVivienda.split(" ");
   const edificio = partes[0];
   const depto = partes[1] || "";
 
-  // Registro principal
   sheetHistorial.appendRow([
-    fechaHoy,
-    edificio,
-    depto,
-    nombreReal, // <--- Aquí ya va el nombre recuperado directamente
-    "Mantenimiento",
-    "Pago de " + mesAPagar,
-    montoPagado,
-    formaPago,
-    referencia // Columna I
+    fechaHoy, edificio, depto, nombreReal,
+    "Mantenimiento", "Pago de " + mesAPagar,
+    montoPagado, formaPago, referencia, bloqueProp
   ]);
 
-  // Registro de recargo si aplica
   if (recargo > 0) {
     sheetHistorial.appendRow([
-      fechaHoy,
-      edificio,
-      depto,
-      nombreReal,
-      "RECARGO",
-      "Recargo 10% " + mesAPagar,
-      recargo,
-      "Automático",
-      "---"
+      fechaHoy, edificio, depto, nombreReal,
+      "RECARGO", "Recargo $50 " + mesAPagar,
+      recargo, "Automático", "---", bloqueProp
     ]);
   }
 
@@ -101,63 +94,54 @@ function generarReportePiscina() {
   const ui = SpreadsheetApp.getUi();
 
   const datosCargos = sheetCargos.getDataRange().getValues();
-  const registroDeudas = {}; // Objeto para agrupar deudas por ID
+  const registroDeudas = {};
 
-  // 1. Contabilizar meses pendientes por cada ID Vivienda
   for (let i = 1; i < datosCargos.length; i++) {
     const idVivienda = datosCargos[i][1];
     const estatus = datosCargos[i][4];
+    const bloque = (datosCargos[i][6] || "").toString().trim();
 
     if (estatus === "Pendiente") {
       if (!registroDeudas[idVivienda]) {
-        registroDeudas[idVivienda] = {
-          meses: [],
-          total: 0
-        };
+        registroDeudas[idVivienda] = { meses: [], total: 0, bloque: bloque };
       }
-      registroDeudas[idVivienda].meses.push(datosCargos[i][5]); // Guarda el nombre del mes
+      registroDeudas[idVivienda].meses.push(datosCargos[i][5]);
       registroDeudas[idVivienda].total += parseFloat(datosCargos[i][3]);
     }
   }
 
-  // 2. Filtrar solo los que deben 2 o más meses y buscar sus datos de contacto
   const listaBloqueo = [];
   const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
 
   for (const id in registroDeudas) {
     if (registroDeudas[id].meses.length >= 2) {
-      // Buscar el nombre y teléfono en la hoja Propietarios
       let nombre = "No encontrado";
-      let telefono = "---";
-
       for (let j = 0; j < datosProp.length; j++) {
-        if (datosProp[j][4] === id) { // Columna H
-          nombre = datosProp[j][0];   // Columna D
-          // Asumiendo que el teléfono está en la columna E de Propietarios (ajusta el index si es otra)
-          // telefono = datosProp[j][1]; 
+        if (datosProp[j][4] === id) {
+          nombre = datosProp[j][0];
           break;
         }
       }
-
       listaBloqueo.push([
-        id,
-        nombre,
+        id, nombre,
         registroDeudas[id].meses.length,
         "$" + registroDeudas[id].total,
-        registroDeudas[id].meses.join(", ")
+        registroDeudas[id].meses.join(", "),
+        registroDeudas[id].bloque
       ]);
     }
   }
 
-  // 3. Mostrar el resultado
   if (listaBloqueo.length === 0) {
     ui.alert("✅ ¡Excelente noticia!\n\nNo hay ninguna vivienda que deba 2 o más meses. Todos pueden usar la piscina.");
   } else {
-    // Creamos una tabla simple en HTML para mostrar la lista
+    listaBloqueo.sort((a, b) => a[5].localeCompare(b[5]) || a[0].localeCompare(b[0]));
+
     let htmlContent = `<div style="font-family: sans-serif;">
-      <p>Las siguientes viviendas tienen <b>2 o más meses de adeudo</b> y su acceso a la piscina debe ser suspendido:</p>
+      <p>Viviendas con <b>2 o más meses de adeudo</b>:</p>
       <table border="1" style="border-collapse: collapse; width: 100%; text-align: left;">
         <tr style="background-color: #f2f2f2;">
+          <th style="padding: 8px;">Manzana</th>
           <th style="padding: 8px;">ID Vivienda</th>
           <th style="padding: 8px;">Propietario</th>
           <th style="padding: 8px;">Meses</th>
@@ -165,7 +149,9 @@ function generarReportePiscina() {
         </tr>`;
 
     listaBloqueo.forEach(row => {
-      htmlContent += `<tr>
+      const bg = row[5] === "MZ 17" ? "#eff6ff" : "#f5f3ff";
+      htmlContent += `<tr style="background-color:${bg};">
+        <td style="padding: 8px; font-weight:bold;">${row[5]}</td>
         <td style="padding: 8px;">${row[0]}</td>
         <td style="padding: 8px;">${row[1]}</td>
         <td style="padding: 8px; color: red; font-weight: bold;">${row[2]}</td>
@@ -173,12 +159,12 @@ function generarReportePiscina() {
       </tr>`;
     });
 
-    htmlContent += `</table><br><p style="font-size: 12px; color: gray;">Meses adeudados: ${listaBloqueo.map(r => r[0] + " (" + r[4] + ")").join(" | ")}</p></div>`;
+    htmlContent += `</table></div>`;
 
     const htmlOutput = HtmlService.createHtmlOutput(htmlContent)
       .setWidth(600)
       .setHeight(450)
-      .setTitle('LISTA DE BLOQUEO - PISCINA');
+      .setTitle('BLOQUEO PISCINA');
     ui.showModalDialog(htmlOutput, ' ');
   }
 }
@@ -237,14 +223,25 @@ function agregarCargo() {
 function agregarCargoIndividual() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
+  const sheetProp = ss.getSheetByName("Propietarios");
 
   // 1. Pedir el ID Vivienda (Edificio Depto)
   const deptoRes = ui.prompt("Nuevo Cargo Individual", "Ingrese el ID Vivienda (Ej: P2 101):", ui.ButtonSet.OK_CANCEL);
   if (deptoRes.getSelectedButton() != ui.Button.OK) return;
-  const idVivienda = deptoRes.getResponseText();
+  const idVivienda = deptoRes.getResponseText().toUpperCase().trim();
+
+  // Look up block from Propietarios
+  const datosProp = sheetProp.getRange("D2:H" + sheetProp.getLastRow()).getValues();
+  let bloqueEncontrado = "MZ 17";
+  for (let i = 0; i < datosProp.length; i++) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === idVivienda) {
+      bloqueEncontrado = (datosProp[i][4] || "MZ 17").toString().trim();
+      break;
+    }
+  }
 
   // 2. Pedir el Motivo/Concepto
-  const motivoRes = ui.prompt("Concepto", "Ingrese el motivo del cargo (ej. Multa, Reparación, Agua):", ui.ButtonSet.OK_CANCEL);
+  const motivoRes = ui.prompt("Concepto", "Manzana detectada: " + bloqueEncontrado + "\n\nIngrese el motivo del cargo (ej. Multa, Reparación, Agua):", ui.ButtonSet.OK_CANCEL);
   if (motivoRes.getSelectedButton() != ui.Button.OK) return;
   const motivo = motivoRes.getResponseText();
 
@@ -260,18 +257,18 @@ function agregarCargoIndividual() {
 
   const sheetCargos = ss.getSheetByName("Cargos");
 
-  // Registrar en la hoja de Cargos
-  // Formato: [Fecha Emisión, Depto/ID, Concepto, Monto, Estatus, Mes Correspondiente]
   sheetCargos.appendRow([
     new Date(),
     idVivienda,
     motivo,
     monto,
     "Pendiente",
-    mes
+    mes,
+    bloqueEncontrado,
+    monto
   ]);
 
-  ss.toast("✅ Cargo de '" + motivo + "' registrado para " + idVivienda);
+  ss.toast("✅ Cargo de '" + motivo + "' registrado para " + idVivienda + " (" + bloqueEncontrado + ")");
 }
 function generarCargosMes() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -323,11 +320,13 @@ function registrarPagoInteligente() {
   let datos = sheetCargos.getDataRange().getValues();
   let filaEncontrada = -1;
   let montoOriginal = 0;
+  let saldoActual = 0;
 
   for (let i = 1; i < datos.length; i++) {
     if (datos[i][1] === idVivienda && datos[i][5] === mes && datos[i][4] === "Pendiente") {
       filaEncontrada = i + 1;
       montoOriginal = datos[i][3];
+      saldoActual = datos[i][7] || montoOriginal;
       break;
     }
   }
@@ -337,32 +336,33 @@ function registrarPagoInteligente() {
     return;
   }
 
-  // 4. Lógica de Recargo (Día 10)
-  let montoConRecargo = montoOriginal;
-  if (fechaFinal.getDate() > 10) {
-    // Si no se ha aplicado recargo antes (asumiendo base 500)
-    if (montoOriginal === 500) {
-      montoConRecargo = 550;
-      ss.toast("Se detectó pago extemporáneo. Total actualizado a $550", "Aviso");
-    }
+  // 4. Lógica de Recargo (si paga mes anterior o después del día 10)
+  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+  const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+  const esMesAnterior = mes !== mesAnioActual;
+  const esPagoTardio = fechaFinal.getDate() > 10;
+
+  if (montoOriginal === 500 && (esMesAnterior || esPagoTardio) && saldoActual === montoOriginal) {
+    saldoActual = 550;
+    ss.toast("Se detectó pago extemporáneo. Total actualizado a $550", "Aviso");
   }
 
   // 5. Procesar el Pago
-  const saldoRestante = montoConRecargo - montoPagado;
+  const saldoRestante = saldoActual - montoPagado;
+  const bloqueCargo = (datos[filaEncontrada - 1][6] || "MZ 17").toString().trim();
 
   if (saldoRestante <= 0) {
-    // Pago completo o de más
     sheetCargos.getRange(filaEncontrada, 5).setValue("Pagado");
-    sheetCargos.getRange(filaEncontrada, 4).setValue(montoConRecargo); // Actualiza si hubo recargo
+    sheetCargos.getRange(filaEncontrada, 8).setValue(0);
     ui.alert("✅ Pago completo registrado.");
   } else {
-    // Pago parcial
-    sheetCargos.getRange(filaEncontrada, 4).setValue(saldoRestante);
+    sheetCargos.getRange(filaEncontrada, 8).setValue(saldoRestante);
     ui.alert("⚠️ Pago parcial. El cargo queda pendiente por: $" + saldoRestante);
   }
 
   // 6. Registrar en Historial
-  sheetHistorial.appendRow([fechaFinal, idVivienda.split(" ")[0], idVivienda.split(" ")[1], "---", "Mantenimiento", "Abono " + mes, montoPagado, "Transferencia/Efectivo"]);
+  sheetHistorial.appendRow([fechaFinal, idVivienda.split(" ")[0], idVivienda.split(" ")[1], "---", "Mantenimiento", "Abono " + mes, montoPagado, "Transferencia/Efectivo", "---", bloqueCargo]);
 }
 function generarCargosMesPro() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -370,56 +370,202 @@ function generarCargosMesPro() {
   const sheetCargos = ss.getSheetByName("Cargos");
   const ui = SpreadsheetApp.getUi();
 
-  const mes = ui.prompt("Mes de Cargo", "Ingrese el mes (ej. Mayo):", ui.ButtonSet.OK).getResponseText();
+  const mes = ui.prompt("Generar Cargos Mensuales", "Ingrese el mes (ej. Mayo):", ui.ButtonSet.OK).getResponseText();
   const monto = ui.prompt("Monto", "Monto de cuota:", ui.ButtonSet.OK).getResponseText();
 
-  // Obtenemos Edificio (Col B) y Depto (Col C)
-  const datos = sheetProp.getRange("B2:C" + sheetProp.getLastRow()).getValues();
+  const datos = sheetProp.getRange("B2:H" + sheetProp.getLastRow()).getValues();
   const fecha = new Date();
+  let countMZ17 = 0, countMZ19 = 0;
 
   datos.forEach(fila => {
     if (fila[0] !== "" && fila[1] !== "") {
-      const idVivienda = fila[0] + " " + fila[1]; // Unión: "P2 101"
+      const edificio = fila[0];
+      const depto = fila[1];
+      const bloque = (fila[6] || "").toString().trim();
 
-      // Antes de agregar, verificamos si ya existe el cargo para no duplicar
-      sheetCargos.appendRow([fecha, idVivienda, "Mantenimiento", monto, "Pendiente", mes]);
+      const idVivienda = edificio + " " + depto;
+      sheetCargos.appendRow([fecha, idVivienda, "Mantenimiento", monto, "Pendiente", mes, bloque, monto]);
+      if (bloque === "MZ 17") countMZ17++;
+      else if (bloque === "MZ 19") countMZ19++;
     }
   });
 
-  ui.alert("Cargos generados exitosamente para todas las unidades.");
+  ui.alert("✅ Cargos generados:\n\nMZ 17: " + countMZ17 + " unidades\nMZ 19: " + countMZ19 + " unidades");
+}
+
+function abrirFormularioCargoIndividual() {
+  const html = HtmlService.createHtmlOutputFromFile('FormCargoIndividual')
+    .setWidth(420)
+    .setHeight(480)
+    .setTitle('Agregar Cargo Individual');
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
+}
+
+function procesarCargoIndividual(datos) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetCargos = ss.getSheetByName("Cargos");
+
+  const { manzana, idVivienda, concepto, monto, mes } = datos;
+
+  sheetCargos.appendRow([
+    new Date(),
+    idVivienda,
+    concepto,
+    monto,
+    "Pendiente",
+    mes,
+    manzana,
+    monto
+  ]);
+
+  return "✅ Cargo de '" + concepto + "' ($" + monto + ") registrado para " + idVivienda + " (" + manzana + ")";
+}
+
+function abrirFormularioBusquedaGlobal() {
+  const html = HtmlService.createHtmlOutputFromFile('FormBusquedaGlobal')
+    .setWidth(420)
+    .setHeight(300)
+    .setTitle('Buscar Propietario');
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
+}
+
+function procesarBusquedaGlobal(datos) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetCargos = ss.getSheetByName("Cargos");
+  const sheetPropietarios = ss.getSheetByName("Propietarios");
+
+  const { manzana, idVivienda } = datos;
+  const idBusqueda = idVivienda.toUpperCase().trim();
+  const fechaHoy = new Date();
+  const diaHoy = fechaHoy.getDate();
+  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+
+  let tablaHtml = "<table class='table table-bordered table-sm' style='font-size:14px;'>";
+  tablaHtml += "<thead class='table-light'><tr><th>Mes</th><th>Concepto</th><th>Monto</th><th>Saldo</th><th>Estatus</th></tr></thead><tbody>";
+
+  let encontrado = false;
+  let deudaTotal = 0;
+
+  const datosCargos = sheetCargos.getDataRange().getValues();
+  for (let i = 1; i < datosCargos.length; i++) {
+    if (datosCargos[i][1].toString().toUpperCase() === idBusqueda) {
+      const bloqueCargo = (datosCargos[i][6] || "").toString().trim();
+      if (bloqueCargo !== manzana) continue;
+
+      const mes = datosCargos[i][5];
+      const concepto = datosCargos[i][2];
+      const monto = parseFloat(datosCargos[i][3]) || 0;
+      let saldo = parseFloat(datosCargos[i][7]) || monto;
+      const estatus = datosCargos[i][4];
+
+      let montoStr = "$" + monto;
+      if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500) {
+        const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+        const esMesAnterior = mes !== mesAnioActual;
+        if (esMesAnterior || diaHoy > 10) {
+          saldo = 550;
+          montoStr = "<span style='text-decoration:line-through;color:#999;'>$500</span> → <b style='color:#dc2626;'>$550</b>";
+        }
+      }
+
+      const colorEstatus = estatus === "Pendiente" ? "red" : "green";
+      if (estatus === "Pendiente") deudaTotal += saldo;
+
+      tablaHtml += "<tr><td>" + mes + "</td><td>" + concepto + "</td><td>" + montoStr + "</td><td>$" + saldo + "</td><td style='color:" + colorEstatus + "; font-weight:bold;'>" + estatus + "</td></tr>";
+      encontrado = true;
+    }
+  }
+  tablaHtml += "</tbody></table>";
+
+  if (!encontrado) {
+    return "<div class='alert alert-warning'>No se encontró información para: " + idBusqueda + " (" + manzana + ")</div>";
+  }
+
+  return "<h5>Resumen para: " + idBusqueda + " (" + manzana + ")</h5><p><b>Deuda Pendiente Total: $" + deudaTotal + "</b></p>" + tablaHtml;
+}
+
+function abrirFormularioCargos() {
+  const html = HtmlService.createHtmlOutputFromFile('FormCargos')
+    .setWidth(420)
+    .setHeight(400)
+    .setTitle('Generar Cargos Mensuales');
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
+}
+
+function verificarCargosExistentes(mesAnio) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetCargos = ss.getSheetByName("Cargos");
+  const datos = sheetCargos.getDataRange().getValues();
+  let count = 0;
+  for (let i = 1; i < datos.length; i++) {
+    if (datos[i][5] === mesAnio) count++;
+  }
+  return { duplicados: count };
+}
+
+function generarCargosConFormulario(mesAnio, monto) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetProp = ss.getSheetByName("Propietarios");
+  const sheetCargos = ss.getSheetByName("Cargos");
+
+  const datos = sheetProp.getRange("B2:H" + sheetProp.getLastRow()).getValues();
+  const fecha = new Date();
+  let countMZ17 = 0, countMZ19 = 0;
+
+  datos.forEach(fila => {
+    if (fila[0] !== "" && fila[1] !== "") {
+      const edificio = fila[0];
+      const depto = fila[1];
+      const bloque = (fila[6] || "").toString().trim();
+      const idVivienda = edificio + " " + depto;
+      sheetCargos.appendRow([fecha, idVivienda, "Mantenimiento", monto, "Pendiente", mesAnio, bloque, monto]);
+      if (bloque === "MZ 17") countMZ17++;
+      else if (bloque === "MZ 19") countMZ19++;
+    }
+  });
+
+  return "✅ Cargos generados para " + mesAnio + ":\n\nMZ 17: " + countMZ17 + " unidades\nMZ 19: " + countMZ19 + " unidades";
 }
 function generarListaBloqueo() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetCargos = ss.getSheetByName("Cargos");
   const datos = sheetCargos.getDataRange().getValues();
-  const deudores = {};
+  const deudoresMZ17 = {};
+  const deudoresMZ19 = {};
 
-  // Empezamos en i=1 para saltar el encabezado
   for (let i = 1; i < datos.length; i++) {
-    let depa = datos[i][1];
-    let estatus = datos[i][4]; // Columna E: Estatus
+    const idVivienda = datos[i][1].toString().toUpperCase().trim();
+    const estatus = datos[i][4];
+    const bloque = (datos[i][6] || "").toString().trim();
 
     if (estatus === "Pendiente") {
-      deudores[depa] = (deudores[depa] || 0) + 1;
+      if (bloque === "MZ 17") deudoresMZ17[idVivienda] = (deudoresMZ17[idVivienda] || 0) + 1;
+      else if (bloque === "MZ 19") deudoresMZ19[idVivienda] = (deudoresMZ19[idVivienda] || 0) + 1;
     }
   }
 
-  let listaBloqueo = [];
-  for (let depa in deudores) {
-    if (deudores[depa] >= 2) {
-      listaBloqueo.push([depa, deudores[depa]]);
-    }
+  let listaMZ17 = [], listaMZ19 = [];
+  for (const id in deudoresMZ17) { if (deudoresMZ17[id] >= 2) listaMZ17.push([id, deudoresMZ17[id]]); }
+  for (const id in deudoresMZ19) { if (deudoresMZ19[id] >= 2) listaMZ19.push([id, deudoresMZ19[id]]); }
+
+  if (listaMZ17.length === 0 && listaMZ19.length === 0) {
+    SpreadsheetApp.getUi().alert("✅ ¡Excelente!\n\nNo hay ninguna vivienda que deba 2 o más meses. Todos pueden usar la piscina.");
+    return;
   }
 
-  if (listaBloqueo.length > 0) {
-    let msj = "Propietarios con 2 o más meses de adeudo:\n\n";
-    listaBloqueo.forEach(res => {
-      msj += "Depto: " + res[0] + " - Meses pendientes: " + res[1] + "\n";
-    });
-    SpreadsheetApp.getUi().alert("LISTA DE BLOQUEO PISCINA", msj, SpreadsheetApp.getUi().ButtonSet.OK);
-  } else {
-    SpreadsheetApp.getUi().alert("No hay deudores críticos para bloqueo.");
+  let msj = "🏊 LISTA DE BLOQUEO PISCINA\n\n";
+  if (listaMZ17.length > 0) {
+    msj += "=== MZ 17 ===\n";
+    listaMZ17.forEach(res => { msj += "  " + res[0] + " — " + res[1] + " meses pendientes\n"; });
+    msj += "\n";
   }
+  if (listaMZ19.length > 0) {
+    msj += "=== MZ 19 ===\n";
+    listaMZ19.forEach(res => { msj += "  " + res[0] + " — " + res[1] + " meses pendientes\n"; });
+  }
+
+  SpreadsheetApp.getUi().alert(msj);
 }
 
 // Servir la página web al entrar a la URL
@@ -442,18 +588,20 @@ function obtenerEstadoCuenta(idVivienda) {
   const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
   const mesActualStr = nombresMeses[fechaHoy.getMonth()];
 
-  // 1. Buscar Nombre
+  // 1. Buscar Nombre y Manzana desde Propietarios (D2:H incluye Manzana en col H)
   const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
   let nombreEncontrado = "";
+  let manzanaEncontrada = "MZ 17";
   for (let i = 0; i < datosProp.length; i++) {
-    if (datosProp[i][4].toString().toUpperCase().trim() === idBusqueda) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === idBusqueda) {
       nombreEncontrado = datosProp[i][0];
+      manzanaEncontrada = (datosProp[i][4] || "MZ 17").toString().trim();
       break;
     }
   }
   if (!nombreEncontrado) return { error: true };
 
-  // 2. Buscar Adeudos y calcular recargos "al vuelo"
+  // 2. Buscar Adeudos y calcular recargos "al vuelo" (sin filtro de bloque para Portal)
   const cargos = sheetCargos.getDataRange().getValues();
   let totalAdeudo = 0;
   let desglose = [];
@@ -461,16 +609,16 @@ function obtenerEstadoCuenta(idVivienda) {
 
   for (let i = 1; i < cargos.length; i++) {
     if (cargos[i][1].toString().toUpperCase().trim() === idBusqueda && cargos[i][4] === "Pendiente") {
+      const bloqueCargo = (cargos[i][6] || "").toString().trim();
+      if (bloqueCargo !== manzanaEncontrada) continue;
       let montoCargo = parseFloat(cargos[i][3]);
       let mesCargo = cargos[i][5];
       let concepto = cargos[i][2];
 
-      // APLICAR RECARGO EN TIEMPO REAL PARA EL PORTAL
-      // Si es mantenimiento, no se ha cobrado recargo aún (monto es 500) 
-      // Y ya pasó del día 10 del mes actual O es un mes anterior atrasado.
+      const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
       if (concepto === "Mantenimiento" && montoCargo === 500) {
-        if (mesCargo !== mesActualStr || diaActual > 10) {
-          montoCargo += 50; // Sumamos los $50 de recargo virtualmente para la pantalla
+        if (mesCargo !== mesAnioActual || diaActual > 10) {
+          montoCargo += 50;
         }
       }
 
@@ -487,7 +635,8 @@ function obtenerEstadoCuenta(idVivienda) {
     nombre: nombreEncontrado,
     saldo: totalAdeudo,
     piscina: contadorMesesPendientes >= 2 ? "BLOQUEADO" : "ACCESO PERMITIDO",
-    detalles: desglose
+    detalles: desglose,
+    bloque: manzanaEncontrada
   };
 }
 
@@ -495,14 +644,18 @@ function busquedaGlobalPropietario() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1. Pedir el ID (Edificio + Depto)
   const respuesta = ui.prompt("Búsqueda Global", "Ingrese Edificio y Depto (Ej: P2 101):", ui.ButtonSet.OK_CANCEL);
   if (respuesta.getSelectedButton() != ui.Button.OK) return;
   const idBusqueda = respuesta.getResponseText().toUpperCase();
 
+  const fechaHoy = new Date();
+  const diaHoy = fechaHoy.getDate();
+  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+
   const datosCargos = ss.getSheetByName("Cargos").getDataRange().getValues();
   let tablaHtml = "<table border='1' style='width:100%; border-collapse:collapse; font-family:Arial;'>";
-  tablaHtml += "<tr style='background-color:#4a86e8; color:white;'><th>Mes</th><th>Concepto</th><th>Monto</th><th>Estatus</th></tr>";
+  tablaHtml += "<tr style='background-color:#4a86e8; color:white;'><th>Mes</th><th>Concepto</th><th>Monto</th><th>Saldo</th><th>Estatus</th></tr>";
 
   let encontrado = false;
   let deudaTotal = 0;
@@ -511,13 +664,25 @@ function busquedaGlobalPropietario() {
     if (datosCargos[i][1].toString().toUpperCase() === idBusqueda) {
       const mes = datosCargos[i][5];
       const concepto = datosCargos[i][2];
-      const monto = datosCargos[i][3];
+      const monto = parseFloat(datosCargos[i][3]) || 0;
+      let saldo = parseFloat(datosCargos[i][7]) || monto;
       const estatus = datosCargos[i][4];
 
-      const colorEstatus = estatus === "Pendiente" ? "red" : "green";
-      if (estatus === "Pendiente") deudaTotal += monto;
+      // Apply recargo display for pending maintenance charges
+      let montoStr = "$" + monto;
+      if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500) {
+        const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+        const esMesAnterior = mes !== mesAnioActual;
+        if (esMesAnterior || diaHoy > 10) {
+          saldo = 550;
+          montoStr = "<span style='text-decoration:line-through;color:#999;'>$500</span> → <b style='color:#dc2626;'>$550</b>";
+        }
+      }
 
-      tablaHtml += `<tr><td>${mes}</td><td>${concepto}</td><td>$${monto}</td><td style="color:${colorEstatus}; font-weight:bold;">${estatus}</td></tr>`;
+      const colorEstatus = estatus === "Pendiente" ? "red" : "green";
+      if (estatus === "Pendiente") deudaTotal += saldo;
+
+      tablaHtml += `<tr><td>${mes}</td><td>${concepto}</td><td>${montoStr}</td><td>$${saldo}</td><td style="color:${colorEstatus}; font-weight:bold;">${estatus}</td></tr>`;
       encontrado = true;
     }
   }
@@ -530,7 +695,7 @@ function busquedaGlobalPropietario() {
 
   const headerHtml = `<h3>Resumen para: ${idBusqueda}</h3><p><b>Deuda Pendiente Total: $${deudaTotal}</b></p>`;
   const htmlOutput = HtmlService.createHtmlOutput(headerHtml + tablaHtml)
-    .setWidth(450)
+    .setWidth(550)
     .setHeight(400);
 
   ui.showModalDialog(htmlOutput, "Estado de Cuenta Detallado");
@@ -539,7 +704,14 @@ function busquedaGlobalPropietario() {
 function mostrarEstadoCuentaCompleto() {
   const html = `
     <div style="font-family:sans-serif;padding:20px;">
-      <h3 style="margin:0 0 15px 0;color:#1e3a8a;">Estado de Cuenta</h3>
+      <h3 style="margin:0 0 15px 0;color:#1e3a8a;">Estado de Cuenta por Fechas</h3>
+      <div class="mb-3">
+        <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#333;">Manzana</label>
+        <select id="inputManzana" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;">
+          <option value="MZ 17">MZ 17</option>
+          <option value="MZ 19">MZ 19</option>
+        </select>
+      </div>
       <div class="mb-3">
         <label style="display:block;font-size:12px;font-weight:bold;margin-bottom:4px;color:#333;">ID Vivienda</label>
         <input type="text" id="inputId" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:4px;" placeholder="Ej: P2 101">
@@ -576,15 +748,15 @@ function mostrarEstadoCuentaCompleto() {
           .withFailureHandler(function(err) {
             document.getElementById('msg').innerText = 'Error: ' + err.message;
           })
-          .generarEstadoCuentaHTML(id, document.getElementById('inputFechaInicio').value, document.getElementById('inputFechaFin').value);
+          .generarEstadoCuentaHTML(id, document.getElementById('inputFechaInicio').value, document.getElementById('inputFechaFin').value, document.getElementById('inputManzana').value);
       }
     </script>
   `;
-  const output = HtmlService.createHtmlOutput(html).setWidth(420).setHeight(320);
-  SpreadsheetApp.getUi().showModalDialog(output, "Estado de Cuenta");
+  const output = HtmlService.createHtmlOutput(html).setWidth(420).setHeight(400);
+  SpreadsheetApp.getUi().showModalDialog(output, "Estado de Cuenta por Fechas");
 }
 
-function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
+function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin, manzana) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetCargos = ss.getSheetByName("Cargos");
   const sheetHistorial = ss.getSheetByName("Historial");
@@ -600,8 +772,9 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
 
   const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
   let nombreProp = "No encontrado";
+  let manzanaProp = null;
   for (let i = 0; i < datosProp.length; i++) {
-    if (datosProp[i][4].toString().toUpperCase().trim() === idBusqueda) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === idBusqueda && datosProp[i][4] === manzana) {
       nombreProp = datosProp[i][0];
       break;
     }
@@ -614,6 +787,8 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
 
   for (let i = 1; i < datosCargos.length; i++) {
     if (datosCargos[i][1].toString().toUpperCase().trim() === idBusqueda) {
+      const bloqueCargo = (datosCargos[i][6] || "").toString().trim();
+      if (bloqueCargo !== manzana) continue;
       const fechaCargo = datosCargos[i][0];
       if (fechaInicio && fechaCargo instanceof Date && fechaCargo < fechaInicio) continue;
       if (fechaFin && fechaCargo instanceof Date && fechaCargo > fechaFin) continue;
@@ -625,7 +800,8 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
       let montoStr = "$" + monto.toFixed(2);
 
       if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500) {
-        const esMesAnterior = mes !== mesActualStr;
+        const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+        const esMesAnterior = mes !== mesAnioActual;
         if (esMesAnterior || diaHoy > 10) {
           montoStr = "$500 → <b style='color:#dc2626;'>$550</b> <span style='color:#92400e;font-size:11px;'>(+Recargo)</span>";
           monto = 550;
@@ -653,7 +829,8 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
 
     const filaEdificio = (datosHistorial[i][1] || "").toString().toUpperCase().trim();
     const filaDepto = (datosHistorial[i][2] || "").toString().trim();
-    if (filaEdificio === edificio && filaDepto === depto) {
+    const filaManzana = (datosHistorial[i][9] || "").toString().trim();
+    if (filaEdificio === edificio && filaDepto === depto && filaManzana === manzana) {
       const monto = parseFloat(datosHistorial[i][6]) || 0;
       totalPagadoHistorial += monto;
       const fechaStr = fecha instanceof Date ? Utilities.formatDate(fecha, Session.getScriptTimeZone(), "dd/MM/yyyy") : fecha;
@@ -662,14 +839,14 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin) {
   }
 
   if (!htmlCargos && !htmlPagos) {
-    return { error: "No se encontró información para " + idBusqueda + " en el rango seleccionado." };
+    return { error: "No se encontró información para " + idBusqueda + " (" + manzana + ") en el rango seleccionado." };
   }
 
   const saldoActual = totalCargos - totalPagadoHistorial;
 
   let html = `
     <div style="font-family:sans-serif;padding:10px;">
-      <h3 style="margin:0 0 5px 0;color:#1e3a8a;">${idBusqueda}</h3>
+      <h3 style="margin:0 0 5px 0;color:#1e3a8a;">${idBusqueda} <span style="font-size:12px;color:#666;">(${manzana})</span></h3>
       <p style="margin:0 0 15px 0;color:#666;font-size:14px;">${nombreProp}</p>
       <div style="display:flex;gap:10px;margin-bottom:15px;">
         <div style="flex:1;background:#f0fdf4;padding:10px;border-radius:8px;text-align:center;">
@@ -720,36 +897,56 @@ function abrirFormularioPago() {
 function obtenerCargosPendientes(idVivienda) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetCargos = ss.getSheetByName("Cargos");
+  const sheetPropietarios = ss.getSheetByName("Propietarios");
   const datos = sheetCargos.getDataRange().getValues();
   const id = idVivienda.toUpperCase().trim();
   const cargos = [];
   const fechaHoy = new Date();
   const diaHoy = fechaHoy.getDate();
 
+  // Look up block from Propietarios
+  const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
+  let bloqueEncontrado = "MZ 17";
+  for (let i = 0; i < datosProp.length; i++) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === id) {
+      bloqueEncontrado = (datosProp[i][4] || "MZ 17").toString().trim();
+      break;
+    }
+  }
+
   for (let i = 1; i < datos.length; i++) {
-    if (datos[i][1].toString().toUpperCase().trim() === id && datos[i][4] === "Pendiente") {
+    const bloqueCargo = (datos[i][6] || "").toString().trim();
+    if (datos[i][1].toString().toUpperCase().trim() === id && datos[i][4] === "Pendiente" && bloqueCargo === bloqueEncontrado) {
       const montoOriginal = parseFloat(datos[i][3]);
-      let montoConRecargo = montoOriginal;
-      if (datos[i][2] === "Mantenimiento" && montoOriginal === 500 && diaHoy > 10) {
-        montoConRecargo = 550;
+      let saldoActual = parseFloat(datos[i][7]) || montoOriginal;
+      const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+      const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+      const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+      const esMesAnterior = (datos[i][5] || "") !== mesAnioActual;
+      const esPagoTardio = diaHoy > 10;
+
+      // Apply recargo to saldo if applicable
+      if (datos[i][2] === "Mantenimiento" && montoOriginal === 500 && (esMesAnterior || esPagoTardio) && saldoActual === montoOriginal) {
+        saldoActual = 550;
       }
       cargos.push({
         fila: i + 1,
         concepto: datos[i][2],
         mes: datos[i][5],
         montoOriginal: montoOriginal,
-        montoConRecargo: montoConRecargo,
-        monto: montoConRecargo
+        saldoActual: saldoActual,
+        monto: saldoActual
       });
     }
   }
-  return cargos;
+  return { cargos: cargos, bloque: bloqueEncontrado };
 }
 function procesarPagoDesdeHTML(datos) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetCargos = ss.getSheetByName("Cargos");
   const sheetHistorial = ss.getSheetByName("Historial");
   const sheetPropietarios = ss.getSheetByName("Propietarios");
+  const fechaHoy = new Date();
 
   const idVivienda = datos.idVivienda.toUpperCase().trim();
   const filaCargo = parseInt(datos.filaCargo);
@@ -759,32 +956,42 @@ function procesarPagoDesdeHTML(datos) {
 
   const datosProp = sheetPropietarios.getRange("D2:H" + sheetPropietarios.getLastRow()).getValues();
   let nombreEncontrado = "No identificado";
+  let bloqueProp = "MZ 17";
   for (let i = 0; i < datosProp.length; i++) {
-    if (datosProp[i][4].toString().toUpperCase().trim() === idVivienda) {
+    if (datosProp[i][3].toString().toUpperCase().trim() === idVivienda) {
       nombreEncontrado = datosProp[i][0];
+      bloqueProp = (datosProp[i][4] || "MZ 17").toString().trim();
       break;
     }
   }
 
   // 1. Leer el cargo por número de fila
-  const fila = sheetCargos.getRange(filaCargo, 1, 1, 6).getValues()[0];
+  const fila = sheetCargos.getRange(filaCargo, 1, 1, 8).getValues()[0];
   const concepto = fila[2];
-  let montoDeudaActual = parseFloat(fila[3]) || 0;
+  const montoOriginal = parseFloat(fila[3]) || 0;
+  let saldoActual = parseFloat(fila[7]) || montoOriginal;
   const mes = fila[5];
-  if (!montoDeudaActual) throw new Error("Cargo no encontrado en la fila " + filaCargo);
+  const bloqueCargo = (fila[6] || bloqueProp).toString().trim();
+  if (!montoOriginal) throw new Error("Cargo no encontrado en la fila " + filaCargo);
 
   // 2. Lógica de Recargo Automático (solo para mantenimiento de $500)
-  if (fechaPago.getDate() > 10 && concepto === "Mantenimiento" && montoDeudaActual === 500) {
-    montoDeudaActual = 550;
+  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const mesActualStr = nombresMeses[fechaHoy.getMonth()];
+  const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
+  const esMesAnterior = mes !== mesAnioActual;
+  const esPagoTardio = fechaHoy.getDate() > 10;
+
+  // Apply recargo to saldo if applicable (only for maintenance)
+  if (concepto === "Mantenimiento" && montoOriginal === 500 && (esMesAnterior || esPagoTardio) && saldoActual === montoOriginal) {
+    saldoActual = 550;
   }
 
   // 3. Calcular Saldo
-  const nuevoSaldo = montoDeudaActual - montoPagado;
+  const nuevoSaldo = saldoActual - montoPagado;
   const estatusFinal = nuevoSaldo <= 0 ? "Pagado" : "Pendiente";
-  const montoFinalCeldas = nuevoSaldo <= 0 ? montoDeudaActual : nuevoSaldo;
 
-  // 4. Actualizar Hoja de Cargos
-  sheetCargos.getRange(filaCargo, 4).setValue(montoFinalCeldas);
+  // 4. Actualizar Hoja de Cargos — only modify Saldo (col 8), never modify Monto (col 4)
+  sheetCargos.getRange(filaCargo, 8).setValue(Math.max(0, nuevoSaldo));
   sheetCargos.getRange(filaCargo, 5).setValue(estatusFinal);
 
   // 5. Registrar en Historial
@@ -793,18 +1000,58 @@ function procesarPagoDesdeHTML(datos) {
   const depto = partes.slice(1).join(" ");
 
   sheetHistorial.appendRow([
-    fechaPago,
-    edificio,
-    depto,
-    nombreEncontrado,
-    concepto,
-    "Pago de " + mes + folio,
-    montoPagado,
-    datos.metodo,
-    datos.folio || "---"
+    fechaPago, edificio, depto, nombreEncontrado,
+    concepto, "Pago de " + mes + folio,
+    montoPagado, datos.metodo, datos.folio || "---", bloqueCargo
   ]);
 
   return "¡Pago de " + nombreEncontrado + " registrado! Saldo: $" + (nuevoSaldo > 0 ? nuevoSaldo : 0);
+}
+
+function abrirFormularioPropietario() {
+  const html = HtmlService.createHtmlOutputFromFile('FormPropietario')
+    .setWidth(450)
+    .setHeight(580)
+    .setTitle('Agregar Propietario');
+  SpreadsheetApp.getUi().showModalDialog(html, ' ');
+}
+
+function procesarPropietarioHTML(datos) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Propietarios");
+
+  const edificio = datos.edificio.toUpperCase();
+  const depto = datos.depto;
+  const nombre = datos.nombre;
+  const telefono = datos.telefono || "";
+  const correo = datos.correo || "";
+  const bloque = datos.bloque;
+  const idVivienda = edificio + " " + depto;
+
+  // Check for duplicate: same idVivienda + same block
+  const datosExistentes = sheet.getRange("H2:I" + sheet.getLastRow()).getValues();
+  for (let i = 0; i < datosExistentes.length; i++) {
+    const idExistente = (datosExistentes[i][0] || "").toString().toUpperCase().trim();
+    const bloqueExistente = (datosExistentes[i][1] || "").toString().trim();
+    if (idExistente === idVivienda.toUpperCase().trim() && bloqueExistente === bloque) {
+      throw new Error("Ya existe un propietario con ID " + idVivienda + " en bloque " + bloque + ".");
+    }
+  }
+
+  // Generate next ID
+  const lastRow = sheet.getLastRow();
+  let nextId = 1;
+  if (lastRow > 1) {
+    const ids = sheet.getRange("A2:A" + lastRow).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      const num = parseInt(ids[i][0]);
+      if (!isNaN(num) && num >= nextId) nextId = num + 1;
+    }
+  }
+
+  sheet.appendRow([nextId, edificio, depto, nombre, telefono, correo, "Activo", idVivienda, bloque]);
+
+  return "✅ Propietario '" + nombre + "' agregado en " + idVivienda + " (" + bloque + ")";
 }
 
 function onOpen() {
@@ -813,12 +1060,13 @@ function onOpen() {
     ui.createMenu('📋 Administración')
       .addItem('📊 Resumen Financiero', 'mostrarResumenFinanciero')
       .addSeparator()
-      .addItem('➕ Agregar Cargo Individual', 'agregarCargoIndividual')
-      .addItem('📅 Generar Cargos del Mes', 'generarCargosMes')
+      .addItem('➕ Agregar Propietario', 'abrirFormularioPropietario')
+      .addItem('➕ Agregar Cargo Individual', 'abrirFormularioCargoIndividual')
+      .addItem('📅 Generar Cargos del Mes', 'abrirFormularioCargos')
       .addSeparator()
       .addItem('📝 Registrar Pago (Formulario)', 'abrirFormularioPago')
-      .addItem('🔍 Buscar Propietario', 'busquedaGlobalPropietario')
-      .addItem('📄 Estado de Cuenta Completo', 'mostrarEstadoCuentaCompleto')
+      .addItem('🔍 Buscar Propietario', 'abrirFormularioBusquedaGlobal')
+      .addItem('📄 Estado de Cuenta por Fechas', 'mostrarEstadoCuentaCompleto')
       .addItem('🏊 Lista de Bloqueo Piscina', 'generarListaBloqueo')
       .addToUi();
   } catch (e) {
@@ -837,52 +1085,99 @@ function mostrarResumenFinanciero() {
   const mesActual = nombresMeses[fechaHoy.getMonth()];
 
   const datosCargos = sheetCargos.getDataRange().getValues();
-  let totalPendiente = 0;
-  let totalPagado = 0;
-  let pendientesEsteMes = 0;
-  let totalEsteMes = 0;
+  let totalCargadoMZ17 = 0, totalCargadoMZ19 = 0;
+  let saldoPendienteMZ17 = 0, saldoPendienteMZ19 = 0;
+  let pendientesEsteMesMZ17 = 0, pendientesEsteMesMZ19 = 0;
+  let recargosPendientesMZ17 = 0, recargosPendientesMZ19 = 0;
+
+  const diaActual = fechaHoy.getDate();
+  const mesAnioActual = mesActual + " " + fechaHoy.getFullYear();
 
   for (let i = 1; i < datosCargos.length; i++) {
+    const bloque = (datosCargos[i][6] || "").toString().trim();
     const monto = parseFloat(datosCargos[i][3]) || 0;
+    const saldo = parseFloat(datosCargos[i][7]) || 0;
     const estatus = datosCargos[i][4];
     const mes = datosCargos[i][5];
+    const concepto = datosCargos[i][2];
 
-    if (estatus === "Pendiente") totalPendiente += monto;
-    if (estatus === "Pagado") totalPagado += monto;
-    if (mes === mesActual) {
-      totalEsteMes += monto;
-      if (estatus === "Pendiente") pendientesEsteMes++;
+    let recargoAplicable = 0;
+    if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500 && saldo === monto) {
+      if (mes !== mesAnioActual || diaActual > 10) {
+        recargoAplicable = 50;
+      }
+    }
+
+    if (bloque === "MZ 17") {
+      totalCargadoMZ17 += monto;
+      if (estatus === "Pendiente") saldoPendienteMZ17 += saldo;
+      if (estatus === "Pendiente") recargosPendientesMZ17 += recargoAplicable;
+      if (mes === mesAnioActual && estatus === "Pendiente") pendientesEsteMesMZ17++;
+    } else if (bloque === "MZ 19") {
+      totalCargadoMZ19 += monto;
+      if (estatus === "Pendiente") saldoPendienteMZ19 += saldo;
+      if (estatus === "Pendiente") recargosPendientesMZ19 += recargoAplicable;
+      if (mes === mesAnioActual && estatus === "Pendiente") pendientesEsteMesMZ19++;
     }
   }
 
-  const totalGeneral = totalPendiente + totalPagado;
-  const cobranza = totalGeneral > 0 ? Math.round((totalPagado / totalGeneral) * 100) : 0;
-
+  // Total paid from Historial
+  let totalPagadoMZ17 = 0, totalPagadoMZ19 = 0;
   const datosHistorial = sheetHistorial.getDataRange().getValues();
-  let cobradoEsteMes = 0;
+  let cobradoEsteMesMZ17 = 0, cobradoEsteMesMZ19 = 0;
+
   for (let i = 1; i < datosHistorial.length; i++) {
-    const fecha = new Date(datosHistorial[i][0]);
-    if (fecha.getMonth() === fechaHoy.getMonth() && fecha.getFullYear() === fechaHoy.getFullYear()) {
-      cobradoEsteMes += parseFloat(datosHistorial[i][6]) || 0;
+    const bloque = (datosHistorial[i][9] || "").toString().trim();
+    const monto = parseFloat(datosHistorial[i][6]) || 0;
+    const concepto = (datosHistorial[i][4] || "").toString().trim();
+    const detalle = (datosHistorial[i][5] || "").toString();
+    const esPagoDelMes = detalle.includes(mesAnioActual) && concepto === "Mantenimiento";
+
+    if (bloque === "MZ 17") {
+      totalPagadoMZ17 += monto;
+      if (esPagoDelMes) cobradoEsteMesMZ17 += monto;
+    } else if (bloque === "MZ 19") {
+      totalPagadoMZ19 += monto;
+      if (esPagoDelMes) cobradoEsteMesMZ19 += monto;
     }
   }
+
+  const cobranzaMZ17 = totalCargadoMZ17 > 0 ? Math.round((totalPagadoMZ17 / totalCargadoMZ17) * 100) : 0;
+  const cobranzaMZ19 = totalCargadoMZ19 > 0 ? Math.round((totalPagadoMZ19 / totalCargadoMZ19) * 100) : 0;
+  
 
   const html = `
     <div style="font-family: sans-serif; padding: 20px;">
       <h3 style="margin:0 0 15px 0; color:#1e3a8a;">Resumen Financiero</h3>
       <p style="font-size:12px; color:#666; margin-bottom:20px;">${mesActual} ${fechaHoy.getFullYear()}</p>
-      <table style="width:100%; border-collapse:collapse;">
-        <tr><td style="padding:8px 0; font-weight:bold;">Total Histórico Cobrado</td><td style="text-align:right; color:#16a34a; font-weight:bold;">$${totalPagado.toLocaleString()}</td></tr>
-        <tr><td style="padding:8px 0; font-weight:bold;">Total Pendiente por Cobrar</td><td style="text-align:right; color:#dc2626; font-weight:bold;">$${totalPendiente.toLocaleString()}</td></tr>
-        <tr><td style="padding:8px 0; font-weight:bold;">Eficiencia de Cobranza</td><td style="text-align:right; font-weight:bold;">${cobranza}%</td></tr>
-        <tr><td colspan="2"><hr style="border:0; border-top:1px solid #ddd;"></td></tr>
-        <tr><td style="padding:8px 0; font-weight:bold;">Cobrado en ${mesActual}</td><td style="text-align:right; color:#16a34a; font-weight:bold;">$${cobradoEsteMes.toLocaleString()}</td></tr>
-        <tr><td style="padding:8px 0; font-weight:bold;">Unidades Pendientes en ${mesActual}</td><td style="text-align:right; color:#dc2626; font-weight:bold;">${pendientesEsteMes}</td></tr>
-      </table>
+      <div style="display:flex;gap:10px;margin-bottom:15px;">
+        <div style="flex:1;background:#eff6ff;padding:12px;border-radius:8px;">
+          <div style="font-weight:bold;color:#1e3a8a;margin-bottom:8px;">MZ 17</div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Total Cargado:</b> <span>$${totalCargadoMZ17.toLocaleString()}</span></div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Total Pagado:</b> <span style="color:#16a34a;">$${totalPagadoMZ17.toLocaleString()}</span></div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Saldo Pendiente:</b> <span style="color:#dc2626;">$${saldoPendienteMZ17.toLocaleString()}</span></div>
+          ${recargosPendientesMZ17 > 0 ? `<div style="font-size:13px;margin-bottom:4px;"><b>Recargos Pendientes:</b> <span style="color:#92400e;">+ $${recargosPendientesMZ17.toLocaleString()}</span></div>` : ''}
+          <div style="font-size:13px;margin-bottom:4px;"><b>Cobranza:</b> ${cobranzaMZ17}%</div>
+          <hr style="border:0;border-top:1px solid #ccc;margin:6px 0;">
+          <div style="font-size:13px;margin-bottom:4px;"><b>Cobrado ${mesActual}:</b> <span style="color:#16a34a;">$${cobradoEsteMesMZ17.toLocaleString()}</span></div>
+          <div style="font-size:13px;"><b>Pendientes este mes:</b> <span style="color:#dc2626;">${pendientesEsteMesMZ17}</span></div>
+        </div>
+        <div style="flex:1;background:#f5f3ff;padding:12px;border-radius:8px;">
+          <div style="font-weight:bold;color:#674ea7;margin-bottom:8px;">MZ 19</div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Total Cargado:</b> <span>$${totalCargadoMZ19.toLocaleString()}</span></div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Total Pagado:</b> <span style="color:#16a34a;">$${totalPagadoMZ19.toLocaleString()}</span></div>
+          <div style="font-size:13px;margin-bottom:4px;"><b>Saldo Pendiente:</b> <span style="color:#dc2626;">$${saldoPendienteMZ19.toLocaleString()}</span></div>
+          ${recargosPendientesMZ19 > 0 ? `<div style="font-size:13px;margin-bottom:4px;"><b>Recargos Pendientes:</b> <span style="color:#92400e;">+ $${recargosPendientesMZ19.toLocaleString()}</span></div>` : ''}
+          <div style="font-size:13px;margin-bottom:4px;"><b>Cobranza:</b> ${cobranzaMZ19}%</div>
+          <hr style="border:0;border-top:1px solid #ccc;margin:6px 0;">
+          <div style="font-size:13px;margin-bottom:4px;"><b>Cobrado ${mesActual}:</b> <span style="color:#16a34a;">$${cobradoEsteMesMZ19.toLocaleString()}</span></div>
+          <div style="font-size:13px;"><b>Pendientes este mes:</b> <span style="color:#dc2626;">${pendientesEsteMesMZ19}</span></div>
+        </div>
+      </div>
     </div>
   `;
 
-  const output = HtmlService.createHtmlOutput(html).setWidth(380).setHeight(300);
+  const output = HtmlService.createHtmlOutput(html).setWidth(550).setHeight(350);
   ui.showModalDialog(output, "📊 Dashboard");
 }
 
@@ -895,12 +1190,14 @@ function obtenerEstadoCuentaPorNombre(nombre) {
   const nombreBusqueda = nombre.toUpperCase().trim();
   let idEncontrado = "";
   let nombreEncontrado = "";
+  let manzanaEncontrada = "MZ 17";
 
   for (let i = 0; i < datosProp.length; i++) {
     const nombreProp = (datosProp[i][0] || "").toString().toUpperCase().trim();
     if (nombreProp.includes(nombreBusqueda)) {
-      idEncontrado = datosProp[i][4];
+      idEncontrado = datosProp[i][3];
       nombreEncontrado = datosProp[i][0];
+      manzanaEncontrada = (datosProp[i][4] || "MZ 17").toString().trim();
       break;
     }
   }
@@ -919,12 +1216,15 @@ function obtenerEstadoCuentaPorNombre(nombre) {
 
   for (let i = 1; i < cargos.length; i++) {
     if (cargos[i][1].toString().toUpperCase().trim() === idEncontrado.toUpperCase().trim() && cargos[i][4] === "Pendiente") {
+      const bloqueCargo = (cargos[i][6] || "").toString().trim();
+      if (bloqueCargo !== manzanaEncontrada) continue;
       let montoCargo = parseFloat(cargos[i][3]);
       let mesCargo = cargos[i][5];
       let concepto = cargos[i][2];
 
+      const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
       if (concepto === "Mantenimiento" && montoCargo === 500) {
-        if (mesCargo !== mesActualStr || diaActual > 10) {
+        if (mesCargo !== mesAnioActual || diaActual > 10) {
           montoCargo += 50;
         }
       }
@@ -942,6 +1242,25 @@ function obtenerEstadoCuentaPorNombre(nombre) {
     nombre: nombreEncontrado,
     saldo: totalAdeudo,
     piscina: contadorMesesPendientes >= 2 ? "BLOQUEADO" : "ACCESO PERMITIDO",
-    detalles: desglose
+    detalles: desglose,
+    bloque: manzanaEncontrada
+  };
+}
+
+function obtenerCoeficientes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetPropietarios = ss.getSheetByName("Propietarios");
+  const datosProp = sheetPropietarios.getRange("I2:I" + sheetPropietarios.getLastRow()).getValues();
+  let countMZ17 = 0, countMZ19 = 0;
+  for (let i = 0; i < datosProp.length; i++) {
+    const b = (datosProp[i][0] || "").toString().trim();
+    if (b === "MZ 17") countMZ17++;
+    else if (b === "MZ 19") countMZ19++;
+  }
+  const total = countMZ17 + countMZ19;
+  return {
+    "MZ 17": { count: countMZ17, percent: total > 0 ? countMZ17 / total : 0.5 },
+    "MZ 19": { count: countMZ19, percent: total > 0 ? countMZ19 / total : 0.5 },
+    total: total
   };
 }

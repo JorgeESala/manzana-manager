@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <style>
+      body { padding: 20px; font-family: 'Segoe UI', sans-serif; }
+      .btn-save { background-color: #674ea7; color: white; width: 100%; font-weight: bold; }
+      .header { text-align: center; color: #674ea7; margin-bottom: 20px; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h4>Agregar Nuevo Propietario</h4>
+    </div>
+
+    <form id="propietarioForm">
+      <div class="mb-3">
+        <label class="form-label">Manzana</label>
+        <select class="form-select" id="bloque" required>
+          <option value="MZ 17">MZ 17</option>
+          <option value="MZ 19">MZ 19</option>
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Edificio</label>
+        <input type="text" class="form-control" id="edificio" placeholder="Ej: P2" required>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Departamento</label>
+        <input type="text" class="form-control" id="depto" placeholder="Ej: 101" required>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Nombre Completo</label>
+        <input type="text" class="form-control" id="nombre" placeholder="Ej: Juan Pérez" required>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Teléfono</label>
+        <input type="text" class="form-control" id="telefono" placeholder="Ej: 9841234567">
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Correo Electrónico</label>
+        <input type="email" class="form-control" id="correo" placeholder="Ej: juan@correo.com">
+      </div>
+
+      <button type="button" class="btn btn-save" onclick="registrar()">AGREGAR PROPIETARIO</button>
+    </form>
+
+    <div id="resultado" class="mt-3 text-center fw-bold"></div>
+
+    <script>
+      function registrar() {
+        const btn = document.querySelector('button');
+        btn.disabled = true;
+
+        const datos = {
+          bloque: document.getElementById('bloque').value,
+          edificio: document.getElementById('edificio').value.trim(),
+          depto: document.getElementById('depto').value.trim(),
+          nombre: document.getElementById('nombre').value.trim(),
+          telefono: document.getElementById('telefono').value.trim(),
+          correo: document.getElementById('correo').value.trim()
+        };
+
+        if (!datos.edificio || !datos.depto || !datos.nombre) {
+          document.getElementById('resultado').className = "mt-3 text-center text-danger";
+          document.getElementById('resultado').innerHTML = "Ingresa al menos Edificio, Depto y Nombre.";
+          btn.disabled = false;
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(res => {
+            document.getElementById('resultado').className = "mt-3 text-center text-success";
+            document.getElementById('resultado').innerHTML = res;
+            document.getElementById('propietarioForm').reset();
+            btn.disabled = false;
+          })
+          .withFailureHandler(err => {
+            document.getElementById('resultado').className = "mt-3 text-center text-danger";
+            document.getElementById('resultado').innerHTML = err.message;
+            btn.disabled = false;
+          })
+          .procesarPropietarioHTML(datos);
+      }
+    </script>
+  </body>
+</html>

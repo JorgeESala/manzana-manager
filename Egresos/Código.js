@@ -22,6 +22,7 @@ function procesarEgresoHTML(datos) {
     fecha,
     nuevoFolio,
     datos.categoria,
+    datos.bloque,
     datos.descripcion,
     monto,
     datos.metodo,

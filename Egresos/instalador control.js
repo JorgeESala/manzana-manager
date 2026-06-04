@@ -5,7 +5,7 @@ function instalarEstructuraContabilidad() {
   // 1. Crear Hoja Egresos
   let sheetEgresos = ss.getSheetByName("Egresos") || ss.insertSheet("Egresos");
   sheetEgresos.clear();
-  sheetEgresos.getRange("A1:G1").setValues([["Fecha Gasto", "Folio Interno", "Categoría", "Descripción Detallada", "Monto Total", "Método Pago", "Folio Operación / Referencia"]])
+  sheetEgresos.getRange("A1:H1").setValues([["Fecha Gasto", "Folio Interno", "Categoría", "Manzana", "Descripción Detallada", "Monto Total", "Método Pago", "Folio Operación / Referencia"]])
              .setBackground("#990000").setFontColor("white").setFontWeight("bold");
   
   // 2. Crear Hoja Dashboard (Indicadores Visuales Financieros)
