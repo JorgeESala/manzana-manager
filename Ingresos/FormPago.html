@@ -82,6 +82,20 @@
 
     document.getElementById('fecha').valueAsDate = new Date();
 
+    function calcularRecargoJS(concepto, montoOriginal, mesCargo, fechaPagoStr) {
+      if (concepto !== 'Mantenimiento' || montoOriginal !== 500) return 0;
+      const meses = {'Enero':0,'Febrero':1,'Marzo':2,'Abril':3,'Mayo':4,'Junio':5,
+                     'Julio':6,'Agosto':7,'Septiembre':8,'Octubre':9,'Noviembre':10,'Diciembre':11};
+      const partes = (mesCargo || '').trim().split(/\s+/);
+      if (partes.length !== 2) return 0;
+      const mesNum = meses[partes[0]];
+      const anio = parseInt(partes[1]);
+      if (isNaN(mesNum) || isNaN(anio)) return 0;
+      const limite = new Date(anio, mesNum, 10, 23, 59, 59);
+      const fecha = new Date(fechaPagoStr + 'T12:00:00');
+      return fecha > limite ? 50 : 0;
+    }
+
     function toggleFolio() {
       const metodo = document.getElementById('metodo').value;
       const divFolio = document.getElementById('divFolio');
@@ -129,11 +143,11 @@
             div.className = 'cargo-item';
             div.onclick = () => seleccionarCargo(idx, c);
             div.id = 'cargo-' + idx;
-            const tieneRecargo = c.montoOriginal !== c.saldoActual;
+            const tieneRecargo = c.tieneRecargo;
             div.innerHTML =
               '<div class="cargo-concepto">' + c.concepto + (tieneRecargo ? ' <span class="badge bg-warning text-dark">+Recargo</span>' : '') + '</div>' +
               '<div class="cargo-detalle">Mes: ' + c.mes + '</div>' +
-              '<div class="cargo-monto">' + (tieneRecargo ? '<span style="text-decoration:line-through;color:#999;font-size:13px;">$' + c.montoOriginal.toFixed(2) + '</span> ' : '') + '$' + c.saldoActual.toFixed(2) + '</div>';
+              '<div class="cargo-monto">' + (tieneRecargo ? '<span style="text-decoration:line-through;color:#999;font-size:13px;">$500</span> ' : '') + '$' + (tieneRecargo ? '550' : '500') + '</div>';
             container.appendChild(div);
           });
           mostrarPaso('paso2');
@@ -150,27 +164,22 @@
       if (!cargoSeleccionado) return;
       const fecha = document.getElementById('fecha').value;
       if (!fecha) return;
-      const dia = new Date(fecha + 'T12:00:00').getDate();
-      const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-      const ahora = new Date();
-      const mesActual = meses[ahora.getMonth()];
-      const mesAnioActual = mesActual + ' ' + ahora.getFullYear();
       const esMantenimiento = cargoSeleccionado.concepto === 'Mantenimiento';
-      const montoBase = cargoSeleccionado.saldoActual;
-      const esMesAnterior = cargoSeleccionado.mes !== mesAnioActual;
-      const esPagoTardio = dia > 10;
-      const montoFinal = (esMantenimiento && cargoSeleccionado.montoOriginal === 500 && (esMesAnterior || esPagoTardio)) ? 550 : montoBase;
-      document.getElementById('monto').value = montoFinal;
-      const conRecargo = montoFinal !== cargoSeleccionado.montoOriginal;
-      document.getElementById('resumenCargo').innerText = cargoSeleccionado.concepto + ' - ' + cargoSeleccionado.mes + ' ($' + cargoSeleccionado.montoOriginal.toFixed(2) + (conRecargo ? ' → $' + montoFinal.toFixed(2) + ' con recargo' : '') + ')';
+      const montoBase = esMantenimiento && cargoSeleccionado.montoOriginal === 500 ? 500 : cargoSeleccionado.montoOriginal;
+      const recargo = calcularRecargoJS(esMantenimiento ? cargoSeleccionado.concepto : '', cargoSeleccionado.montoOriginal, cargoSeleccionado.mes, fecha);
+      const montoFinal = montoBase + recargo;
+      document.getElementById('monto').value = montoFinal.toFixed(2);
+      const conRecargo = recargo > 0;
+      document.getElementById('resumenCargo').innerText = cargoSeleccionado.concepto + ' - ' + cargoSeleccionado.mes + ' ($' + montoBase.toFixed(2) + (conRecargo ? ' → $' + montoFinal.toFixed(2) + ' con recargo' : '') + ')';
     }
 
     function seleccionarCargo(idx, cargo) {
       document.querySelectorAll('.cargo-item').forEach(el => el.classList.remove('selected'));
       document.getElementById('cargo-' + idx).classList.add('selected');
       cargoSeleccionado = cargo;
-      document.getElementById('resumenCargo').innerText = cargo.concepto + ' - ' + cargo.mes + ' ($' + cargo.monto.toFixed(2) + ')';
-      document.getElementById('monto').value = cargo.monto;
+      const montoBase = cargo.concepto === 'Mantenimiento' && cargo.montoOriginal === 500 ? 500 : cargo.montoOriginal;
+      document.getElementById('resumenCargo').innerText = cargo.concepto + ' - ' + cargo.mes + ' ($' + montoBase.toFixed(2) + ')';
+      document.getElementById('monto').value = montoBase.toFixed(2);
       mostrarPaso('paso3');
       recalcularMonto();
     }

@@ -13,6 +13,19 @@ function obtenerBloqueActivo() {
   return bloque || "MZ 17";
 }
 
+function calcularRecargo(concepto, montoOriginal, mesCargo, fechaPago) {
+  if (concepto !== "Mantenimiento" || montoOriginal !== 500) return 0;
+  const meses = {"Enero":0,"Febrero":1,"Marzo":2,"Abril":3,"Mayo":4,"Junio":5,
+                 "Julio":6,"Agosto":7,"Septiembre":8,"Octubre":9,"Noviembre":10,"Diciembre":11};
+  const partes = (mesCargo || "").trim().split(/\s+/);
+  if (partes.length !== 2) return 0;
+  const mesNum = meses[partes[0]];
+  const anio = parseInt(partes[1]);
+  if (isNaN(mesNum) || isNaN(anio)) return 0;
+  const limite = new Date(anio, mesNum, 10, 23, 59, 59);
+  return fechaPago > limite ? 50 : 0;
+}
+
 // ==========================================
 // 1. BOTÓN HOJA "RECIBOS": GUARDAR, PDF Y CORREO (GMAIL WEB)
 // ==========================================
@@ -616,15 +629,14 @@ function obtenerEstadoCuenta(idVivienda) {
       let concepto = cargos[i][2];
 
       const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
-      if (concepto === "Mantenimiento" && montoCargo === 500) {
-        if (mesCargo !== mesAnioActual || diaActual > 10) {
-          montoCargo += 50;
-        }
+      const recargo = calcularRecargo(concepto, montoCargo, mesCargo, fechaHoy);
+      if (recargo > 0) {
+        montoCargo += 50;
       }
 
       totalAdeudo += montoCargo;
       desglose.push({
-        mes: mesCargo + (montoCargo > 500 ? " (+Recargo)" : ""),
+        mes: mesCargo + (recargo > 0 ? " (+Recargo)" : ""),
         monto: montoCargo
       });
       contadorMesesPendientes++;
@@ -671,9 +683,8 @@ function busquedaGlobalPropietario() {
       // Apply recargo display for pending maintenance charges
       let montoStr = "$" + monto;
       if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500) {
-        const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
-        const esMesAnterior = mes !== mesAnioActual;
-        if (esMesAnterior || diaHoy > 10) {
+        const recargo = calcularRecargo(concepto, monto, mes, fechaHoy);
+        if (recargo > 0) {
           saldo = 550;
           montoStr = "<span style='text-decoration:line-through;color:#999;'>$500</span> → <b style='color:#dc2626;'>$550</b>";
         }
@@ -800,9 +811,8 @@ function generarEstadoCuentaHTML(idBusqueda, strFechaInicio, strFechaFin, manzan
       let montoStr = "$" + monto.toFixed(2);
 
       if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500) {
-        const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
-        const esMesAnterior = mes !== mesAnioActual;
-        if (esMesAnterior || diaHoy > 10) {
+        const recargo = calcularRecargo(concepto, monto, mes, fechaHoy);
+        if (recargo > 0) {
           montoStr = "$500 → <b style='color:#dc2626;'>$550</b> <span style='color:#92400e;font-size:11px;'>(+Recargo)</span>";
           monto = 550;
         }
@@ -919,14 +929,8 @@ function obtenerCargosPendientes(idVivienda) {
     if (datos[i][1].toString().toUpperCase().trim() === id && datos[i][4] === "Pendiente" && bloqueCargo === bloqueEncontrado) {
       const montoOriginal = parseFloat(datos[i][3]);
       let saldoActual = parseFloat(datos[i][7]) || montoOriginal;
-      const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-      const mesActualStr = nombresMeses[fechaHoy.getMonth()];
-      const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
-      const esMesAnterior = (datos[i][5] || "") !== mesAnioActual;
-      const esPagoTardio = diaHoy > 10;
-
-      // Apply recargo to saldo if applicable
-      if (datos[i][2] === "Mantenimiento" && montoOriginal === 500 && (esMesAnterior || esPagoTardio) && saldoActual === montoOriginal) {
+      const recargoHoy = calcularRecargo(datos[i][2], montoOriginal, datos[i][5], fechaHoy);
+      if (recargoHoy > 0 && saldoActual === montoOriginal) {
         saldoActual = 550;
       }
       cargos.push({
@@ -934,6 +938,7 @@ function obtenerCargosPendientes(idVivienda) {
         concepto: datos[i][2],
         mes: datos[i][5],
         montoOriginal: montoOriginal,
+        tieneRecargo: recargoHoy > 0,
         saldoActual: saldoActual,
         monto: saldoActual
       });
@@ -975,14 +980,8 @@ function procesarPagoDesdeHTML(datos) {
   if (!montoOriginal) throw new Error("Cargo no encontrado en la fila " + filaCargo);
 
   // 2. Lógica de Recargo Automático (solo para mantenimiento de $500)
-  const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-  const mesActualStr = nombresMeses[fechaHoy.getMonth()];
-  const mesAnioActual = mesActualStr + " " + fechaHoy.getFullYear();
-  const esMesAnterior = mes !== mesAnioActual;
-  const esPagoTardio = fechaHoy.getDate() > 10;
-
-  // Apply recargo to saldo if applicable (only for maintenance)
-  if (concepto === "Mantenimiento" && montoOriginal === 500 && (esMesAnterior || esPagoTardio) && saldoActual === montoOriginal) {
+  const recargo = calcularRecargo(concepto, montoOriginal, mes, fechaPago);
+  if (recargo > 0 && saldoActual === montoOriginal) {
     saldoActual = 550;
   }
 
@@ -1062,7 +1061,7 @@ function onOpen() {
       .addSeparator()
       .addItem('➕ Agregar Propietario', 'abrirFormularioPropietario')
       .addItem('➕ Agregar Cargo Individual', 'abrirFormularioCargoIndividual')
-      .addItem('📅 Generar Cargos del Mes', 'abrirFormularioCargos')
+      .addItem('📅 Generar Cargos de Mantenimiento', 'abrirFormularioCargos')
       .addSeparator()
       .addItem('📝 Registrar Pago (Formulario)', 'abrirFormularioPago')
       .addItem('🔍 Buscar Propietario', 'abrirFormularioBusquedaGlobal')
@@ -1103,9 +1102,7 @@ function mostrarResumenFinanciero() {
 
     let recargoAplicable = 0;
     if (estatus === "Pendiente" && concepto === "Mantenimiento" && monto === 500 && saldo === monto) {
-      if (mes !== mesAnioActual || diaActual > 10) {
-        recargoAplicable = 50;
-      }
+      recargoAplicable = calcularRecargo(concepto, monto, mes, fechaHoy);
     }
 
     if (bloque === "MZ 17") {

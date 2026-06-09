@@ -36,7 +36,7 @@
 
         <div class="mb-3">
           <label class="form-label">Año</label>
-          <select class="form-select" id="anio" required></select>
+          <input type="number" class="form-control" id="anio" min="2020" max="2099" required>
         </div>
 
         <div class="mb-3">
@@ -51,19 +51,9 @@
     <div id="resultado" class="mt-3 text-center fw-bold"></div>
 
     <script>
-      // Fill year dropdown
-      const anioSelect = document.getElementById('anio');
-      const anioActual = new Date().getFullYear();
-      for (let a = anioActual; a >= anioActual - 1; a--) {
-        const opt = document.createElement('option');
-        opt.value = a;
-        opt.text = a;
-        anioSelect.appendChild(opt);
-      }
-
-      // Default to current month
-      const mesActual = new Date().getMonth();
-      anioSelect.selectedIndex = 0;
+      document.getElementById('anio').value = new Date().getFullYear();
+      const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      document.getElementById('mes').value = meses[new Date().getMonth()];
 
       function verificar() {
         const mes = document.getElementById('mes').value;

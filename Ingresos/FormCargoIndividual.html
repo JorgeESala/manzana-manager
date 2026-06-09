@@ -38,9 +38,28 @@
       <input type="number" class="form-control" id="monto" placeholder="Ej: 500" step="0.01" required>
     </div>
 
-    <div class="mb-3">
-      <label class="form-label">Mes</label>
-      <input type="text" class="form-control" id="mes" placeholder="Ej: Junio 2026" required>
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label">Mes</label>
+        <select class="form-select" id="mes" required>
+          <option value="Enero">Enero</option>
+          <option value="Febrero">Febrero</option>
+          <option value="Marzo">Marzo</option>
+          <option value="Abril">Abril</option>
+          <option value="Mayo">Mayo</option>
+          <option value="Junio">Junio</option>
+          <option value="Julio">Julio</option>
+          <option value="Agosto">Agosto</option>
+          <option value="Septiembre">Septiembre</option>
+          <option value="Octubre">Octubre</option>
+          <option value="Noviembre">Noviembre</option>
+          <option value="Diciembre">Diciembre</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label">Año</label>
+        <input type="number" class="form-control" id="anio" min="2020" max="2099" required>
+      </div>
     </div>
 
     <button type="button" class="btn btn-save" onclick="registrar()">AGREGAR CARGO</button>
@@ -49,6 +68,8 @@
   <div id="resultado" class="mt-3 text-center fw-bold"></div>
 
   <script>
+    document.getElementById('anio').value = new Date().getFullYear();
+
     function registrar() {
       const btn = document.querySelector('button');
       btn.disabled = true;
@@ -58,7 +79,7 @@
         idVivienda: document.getElementById('idVivienda').value.trim().toUpperCase(),
         concepto: document.getElementById('concepto').value.trim(),
         monto: parseFloat(document.getElementById('monto').value),
-        mes: document.getElementById('mes').value.trim()
+        mes: document.getElementById('mes').value + ' ' + document.getElementById('anio').value
       };
 
       if (!datos.idVivienda || !datos.concepto || isNaN(datos.monto) || !datos.mes) {
